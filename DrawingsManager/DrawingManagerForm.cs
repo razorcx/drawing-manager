@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using MoreLinq;
 using Tekla.Structures;
 using Tekla.Structures.Drawing;
 using Tekla.Structures.Model;
@@ -29,56 +30,6 @@ namespace DrawingsManager
 			RegisterEventHandler();
 		}
 
-		public void RegisterEventHandler()
-		{
-			_events.SelectionChange += Events_SelectionChangeEvent;
-			_events.ModelObjectChanged += Events_ModelObjectChangedEvent;
-			_events.Register();
-		}
-
-		public void UnRegisterEventHandler()
-		{
-			_events.UnRegister();
-		}
-
-		void Events_SelectionChangeEvent()
-		{
-			/* Make sure that the inner code block is running synchronously */
-			lock (_selectionEventHandlerLock)
-			{
-				System.Console.WriteLine("Selection changed event received.");
-
-				var selection = new Tekla.Structures.Model.UI.ModelObjectSelector()
-					.GetSelectedObjects()
-					.ToAList<Part>();
-				if (!selection.Any()) return;
-				var rawRows = dataGridView1.Rows.OfType<DataGridViewRow>().ToList();
-
-				var assemblies = selection.Select(p => p.GetAssembly());
-
-				var rows = rawRows.AsParallel().Where(r =>
-				{
-					dynamic item = r.DataBoundItem;
-					if (item.Id == null) return false;
-					var id = (int) item.Id;
-					return assemblies.FirstOrDefault(p => p.Identifier.ID == id) != null;
-				}).ToList();
-
-				CreateBom(rows);
-			}
-		}
-
-		void Events_ModelObjectChangedEvent(List<ChangeData> changes)
-		{
-			/* Make sure that the inner code block is running synchronously */
-			lock (_changedObjectHandlerLock)
-			{
-				foreach (ChangeData data in changes)
-					System.Console.WriteLine("Changed event received " + ":" + data.Object.ToString() + ":" + " Type" + ":" + data.Type.ToString() + " guid: " + data.Object.Identifier.GUID.ToString());
-				System.Console.WriteLine("Changed event received for " + changes.Count.ToString() + " objects");
-			}
-		}
-
 		private void DrawingManager_Load(object sender, EventArgs e)
 		{
 			_drawings = _drawingHandler.GetDrawings().ToAList<Drawing>();
@@ -90,6 +41,8 @@ namespace DrawingsManager
 		{
 			if (_drawingHandler.GetConnectionStatus())
 			{
+				var revisions = new List<dynamic>(0);
+
 				var drawingItems = _drawings.AsParallel().Select(d =>
 				{
 					var part = GetPart(d);
@@ -97,6 +50,22 @@ namespace DrawingsManager
 					var part_pos = string.Empty;
 					part?.GetReportProperty("ASSEMBLY_POS", ref assy_pos);
 					part?.GetReportProperty("PART_POS", ref part_pos);
+
+					var revisionMark = string.Empty;
+					part?.GetReportProperty("DRAWING.REVISION.MARK", ref revisionMark);
+					var revisionDescription = string.Empty;
+					part?.GetReportProperty("DRAWING.REVISION.DESCRIPTION", ref revisionDescription);
+
+					var revisionlastMark = string.Empty;
+					part?.GetReportProperty("DRAWING.REVISION.LAST_MARK", ref revisionlastMark);
+
+					var revisionItem = new 
+					{
+						Mark = revisionMark,
+						Description = revisionDescription,
+					};
+
+					revisions.Add(revisionItem);
 
 					var size = Math.Round(d.Layout.SheetSize.Width / 25.4, 1) 
 						+ "x" + Math.Round(d.Layout.SheetSize.Height / 25.4, 1);
@@ -110,6 +79,8 @@ namespace DrawingsManager
 						AssyMark = assy_pos,
 						PartMark = part_pos,
 						Name = d.Name,
+						Rev = revisionMark,
+						RevDescription = revisionDescription,
 						CreationDate = d.CreationDate,
 						ModificationDate = d.ModificationDate,
 						Title1 = d.Title1,
@@ -220,6 +191,47 @@ namespace DrawingsManager
 			new Tekla.Structures.Model.UI.ModelObjectSelector().Select(members);
 
 			CreateBom(rows);
+			CreateRevisionItem(rows);
+		}
+
+		private void CreateRevisionItem(List<DataGridViewRow> rows)
+		{
+			var revisionDetails = new List<string>();
+
+			rows
+				.Where(r => ((dynamic) r.DataBoundItem).Id != null)
+				.OrderBy(r => ((dynamic) r.DataBoundItem).AssyMark)
+				.ForEach(row =>
+				{
+					dynamic r = row.DataBoundItem;
+					var id = (int) r.Id;
+					var part = _model.SelectModelObject(new Identifier(id));
+
+					var revisionMark = string.Empty;
+					part?.GetReportProperty("DRAWING.REVISION.MARK", ref revisionMark);
+					var revisionDescription = string.Empty;
+					part?.GetReportProperty("DRAWING.REVISION.DESCRIPTION", ref revisionDescription);
+
+					var revisionlastMark = string.Empty;
+					part?.GetReportProperty("DRAWING.REVISION.LAST_MARK", ref revisionlastMark);
+
+					var assy_pos = string.Empty;
+					var part_pos = string.Empty;
+					part?.GetReportProperty("ASSEMBLY_POS", ref assy_pos);
+					part?.GetReportProperty("PART_POS", ref part_pos);
+
+					revisionDetails.Add("Assembly Mark: " + assy_pos);
+					if(!string.IsNullOrEmpty(part_pos))
+						revisionDetails.Add("Part Mark: " + part_pos);
+					revisionDetails.Add("Rev: " + revisionlastMark);
+					revisionDetails.Add("Description: " + revisionDescription);
+					revisionDetails.Add("-----------------------------------------------------------------");
+				});
+
+			listBox1.BeginInvoke((Action)(() =>
+			{
+				listBox1.DataSource = revisionDetails;
+			}));
 		}
 
 		private void CreateBom(List<DataGridViewRow> rows)
@@ -227,8 +239,6 @@ namespace DrawingsManager
 			if(!rows.Any()) return;
 
 			var allParts = new List<Part>();
-
-			var members = new ArrayList();
 
 			var parts = rows
 				.Where(r => ((dynamic)r.DataBoundItem).Id != null)
@@ -238,7 +248,6 @@ namespace DrawingsManager
 					dynamic r = row.DataBoundItem;
 					var id = (int)r.Id;
 					var modelObject = _model.SelectModelObject(new Identifier(id));
-					members.Add(modelObject);
 
 					var assyPos = string.Empty;
 					var partPos = string.Empty;
@@ -393,6 +402,56 @@ namespace DrawingsManager
 			drawing = adm.GetAssemblyDrawing(item.AssyMark.ToString());
 			adm.Handler.CloseActiveDrawing();
 			adm.SetActiveDrawing(drawing);
+		}
+
+		public void RegisterEventHandler()
+		{
+			_events.SelectionChange += Events_SelectionChangeEvent;
+			_events.ModelObjectChanged += Events_ModelObjectChangedEvent;
+			_events.Register();
+		}
+
+		public void UnRegisterEventHandler()
+		{
+			_events.UnRegister();
+		}
+
+		void Events_SelectionChangeEvent()
+		{
+			/* Make sure that the inner code block is running synchronously */
+			lock (_selectionEventHandlerLock)
+			{
+				System.Console.WriteLine("Selection changed event received.");
+
+				var selection = new Tekla.Structures.Model.UI.ModelObjectSelector()
+					.GetSelectedObjects()
+					.ToAList<Part>();
+				if (!selection.Any()) return;
+				var rawRows = dataGridView1.Rows.OfType<DataGridViewRow>().ToList();
+
+				var assemblies = selection.Select(p => p.GetAssembly());
+
+				var rows = rawRows.AsParallel().Where(r =>
+				{
+					dynamic item = r.DataBoundItem;
+					if (item.Id == null) return false;
+					var id = (int)item.Id;
+					return assemblies.FirstOrDefault(p => p.Identifier.ID == id) != null;
+				}).ToList();
+
+				CreateBom(rows);
+			}
+		}
+
+		void Events_ModelObjectChangedEvent(List<ChangeData> changes)
+		{
+			/* Make sure that the inner code block is running synchronously */
+			lock (_changedObjectHandlerLock)
+			{
+				foreach (ChangeData data in changes)
+					System.Console.WriteLine("Changed event received " + ":" + data.Object.ToString() + ":" + " Type" + ":" + data.Type.ToString() + " guid: " + data.Object.Identifier.GUID.ToString());
+				System.Console.WriteLine("Changed event received for " + changes.Count.ToString() + " objects");
+			}
 		}
 	}
 }
