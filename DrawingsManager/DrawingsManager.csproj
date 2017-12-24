@@ -96,14 +96,18 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AssemblyDrawingManager.cs" />
+    <Compile Include="DrawingManagerBase.cs" />
     <Compile Include="DrawingManagerForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="DrawingManagerForm.Designer.cs">
       <DependentUpon>DrawingManagerForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="ExtensionMethods.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SingleDrawingManager.cs" />
     <EmbeddedResource Include="DrawingManagerForm.resx">
       <DependentUpon>DrawingManagerForm.cs</DependentUpon>
     </EmbeddedResource>

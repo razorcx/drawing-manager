@@ -4,24 +4,79 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
-using Newtonsoft.Json;
 using Tekla.Structures;
 using Tekla.Structures.Drawing;
 using Tekla.Structures.Model;
 using Color = System.Drawing.Color;
+using ModelObject = Tekla.Structures.Model.ModelObject;
 using Part = Tekla.Structures.Model.Part;
 
 namespace DrawingsManager
 {
-	public partial class DrawingManager : Form
+	public partial class DrawingManagerForm : Form
 	{
 		private readonly Model _model = new Model();
 		private readonly DrawingHandler _drawingHandler = new DrawingHandler();
 		private List<Drawing> _drawings;
+		private readonly Tekla.Structures.Model.Events _events = new Tekla.Structures.Model.Events();
+		private object _selectionEventHandlerLock = new object();
+		private object _changedObjectHandlerLock = new object();
 
-		public DrawingManager()
+
+		public DrawingManagerForm()
 		{
 			InitializeComponent();
+			RegisterEventHandler();
+		}
+
+		public void RegisterEventHandler()
+		{
+			_events.SelectionChange += Events_SelectionChangeEvent;
+			_events.ModelObjectChanged += Events_ModelObjectChangedEvent;
+			_events.Register();
+		}
+
+		public void UnRegisterEventHandler()
+		{
+			_events.UnRegister();
+		}
+
+		void Events_SelectionChangeEvent()
+		{
+			/* Make sure that the inner code block is running synchronously */
+			lock (_selectionEventHandlerLock)
+			{
+				System.Console.WriteLine("Selection changed event received.");
+
+				var selection = new Tekla.Structures.Model.UI.ModelObjectSelector()
+					.GetSelectedObjects()
+					.ToAList<Part>();
+				if (!selection.Any()) return;
+				var rawRows = dataGridView1.Rows.OfType<DataGridViewRow>().ToList();
+
+				var assemblies = selection.Select(p => p.GetAssembly());
+
+				var rows = rawRows.AsParallel().Where(r =>
+				{
+					dynamic item = r.DataBoundItem;
+					if (item.Id == null) return false;
+					var id = (int) item.Id;
+					return assemblies.FirstOrDefault(p => p.Identifier.ID == id) != null;
+				}).ToList();
+
+				CreateBom(rows);
+			}
+		}
+
+		void Events_ModelObjectChangedEvent(List<ChangeData> changes)
+		{
+			/* Make sure that the inner code block is running synchronously */
+			lock (_changedObjectHandlerLock)
+			{
+				foreach (ChangeData data in changes)
+					System.Console.WriteLine("Changed event received " + ":" + data.Object.ToString() + ":" + " Type" + ":" + data.Type.ToString() + " guid: " + data.Object.Identifier.GUID.ToString());
+				System.Console.WriteLine("Changed event received for " + changes.Count.ToString() + " objects");
+			}
 		}
 
 		private void DrawingManager_Load(object sender, EventArgs e)
@@ -65,7 +120,13 @@ namespace DrawingsManager
 					return drawingItem;
 				}).ToList();
 
-				dataGridView1.DataSource = drawingItems.OrderBy(d => d.DrawingMark).ToList();
+				dataGridView1.DataSource = 
+					drawingItems
+					.OrderBy(d => d.Type)
+					.ThenBy(d => d.DrawingMark)
+					.ThenBy(d => d.PartMark)
+					.ThenBy(d => d.AssyMark)
+					.ToList();
 
 				var rows = dataGridView1.Rows.OfType<DataGridViewRow>().ToList();
 				rows.ForEach(r =>
@@ -124,7 +185,7 @@ namespace DrawingsManager
 			return result;
 		}
 
-		public Tekla.Structures.Model.ModelObject GetPart(Drawing drawing)
+		public ModelObject GetPart(Drawing drawing)
 		{
 			if (drawing is AssemblyDrawing)
 			{
@@ -150,7 +211,7 @@ namespace DrawingsManager
 			{
 				dynamic r = row.DataBoundItem;
 				if (r.Id == null) return;
-				var id = (int) r.Id;
+				var id = (int)r.Id;
 				var modelObject = _model.SelectModelObject(new Identifier(id));
 				members.Add(modelObject);
 
@@ -158,15 +219,24 @@ namespace DrawingsManager
 
 			new Tekla.Structures.Model.UI.ModelObjectSelector().Select(members);
 
+			CreateBom(rows);
+		}
+
+		private void CreateBom(List<DataGridViewRow> rows)
+		{
+			if(!rows.Any()) return;
+
 			var allParts = new List<Part>();
 
+			var members = new ArrayList();
+
 			var parts = rows
-				.Where(r => ((dynamic) r.DataBoundItem).Id != null)
+				.Where(r => ((dynamic)r.DataBoundItem).Id != null)
 				.OrderBy(r => ((dynamic)r.DataBoundItem).AssyMark)
 				.SelectMany(row =>
 				{
 					dynamic r = row.DataBoundItem;
-					var id = (int) r.Id;
+					var id = (int)r.Id;
 					var modelObject = _model.SelectModelObject(new Identifier(id));
 					members.Add(modelObject);
 
@@ -178,11 +248,11 @@ namespace DrawingsManager
 					var topLevel = string.Empty;
 					var finish = string.Empty;
 
-					var secondaries = new List<Tekla.Structures.Model.Part>();
+					var secondaries = new List<Part>();
 					if (modelObject is Assembly)
 					{
-						var part = ((Assembly) modelObject).GetMainPart() as Tekla.Structures.Model.Part;
-						((Assembly) modelObject).GetReportProperty("ASSEMBLY_POS", ref assyPos);
+						var part = ((Assembly)modelObject).GetMainPart() as Tekla.Structures.Model.Part;
+						((Assembly)modelObject).GetReportProperty("ASSEMBLY_POS", ref assyPos);
 						part?.GetReportProperty("PART_POS", ref partPos);
 						part?.GetReportProperty("NAME", ref name);
 						part?.GetReportProperty("PROFILE", ref profile);
@@ -190,11 +260,11 @@ namespace DrawingsManager
 						part?.GetReportProperty("TOP_LEVEL", ref topLevel);
 						part?.GetReportProperty("FINISH", ref finish);
 
-						secondaries = ((Assembly) modelObject).GetSecondaries().OfType<Tekla.Structures.Model.Part>().ToList();
+						secondaries = ((Assembly)modelObject).GetSecondaries().OfType<Tekla.Structures.Model.Part>().ToList();
 
 						allParts.Add(part);
 					}
-					else if (modelObject is Tekla.Structures.Model.Part)
+					else if (modelObject is Part)
 					{
 						var part = modelObject as Tekla.Structures.Model.Part;
 						part?.GetReportProperty("ASSEMBLY_POS", ref assyPos);
@@ -221,30 +291,30 @@ namespace DrawingsManager
 					};
 
 					var secViews = secondaries.Select(s =>
-					{
-						s?.GetReportProperty("ASSEMBLY_POS", ref assyPos);
-						s?.GetReportProperty("PART_POS", ref partPos);
-						s?.GetReportProperty("NAME", ref name);
-						s?.GetReportProperty("PROFILE", ref profile);
-						s?.GetReportProperty("MATERIAL", ref material);
-						s?.GetReportProperty("TOP_LEVEL", ref topLevel);
-						s?.GetReportProperty("FINISH", ref finish);
-
-						allParts.Add(s);
-
-						return new
 						{
-							AssyMark = string.Empty,
-							PartMark = partPos,
-							Name = name,
-							Profile = profile,
-							Material = material,
-							Finish = finish,
-							TopLevel = topLevel,
-						};
-					})
-					.OrderBy(s => s.PartMark)
-					.ToList();
+							s?.GetReportProperty("ASSEMBLY_POS", ref assyPos);
+							s?.GetReportProperty("PART_POS", ref partPos);
+							s?.GetReportProperty("NAME", ref name);
+							s?.GetReportProperty("PROFILE", ref profile);
+							s?.GetReportProperty("MATERIAL", ref material);
+							s?.GetReportProperty("TOP_LEVEL", ref topLevel);
+							s?.GetReportProperty("FINISH", ref finish);
+
+							allParts.Add(s);
+
+							return new
+							{
+								AssyMark = string.Empty,
+								PartMark = partPos,
+								Name = name,
+								Profile = profile,
+								Material = material,
+								Finish = finish,
+								TopLevel = topLevel,
+							};
+						})
+						.OrderBy(s => s.PartMark)
+						.ToList();
 
 					views.Add(view);
 					views.AddRange(secViews);
@@ -253,21 +323,36 @@ namespace DrawingsManager
 
 				}).ToList();
 
-			dataGridView2.DataSource = parts.ToList();
-
-			var gridRows = dataGridView2.Rows.OfType<DataGridViewRow>().ToList();
-			gridRows.ForEach(r =>
+			dataGridView1.BeginInvoke((Action) (() =>
 			{
-				dynamic item = r.DataBoundItem;
-				if (item.AssyMark == item.PartMark)
+				dataGridView1.ClearSelection();
+				rows.ForEach(r =>
 				{
-					r.DefaultCellStyle.Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Bold);
-					r.DefaultCellStyle.BackColor = Color.LightCyan;
-					r.DefaultCellStyle.ForeColor = Color.Black;
-				}
-			});
+					r.Selected = true;
+				});
+			}));
 
-			richTextBox1.Text = allParts.ToJson();
+			dataGridView2.BeginInvoke((Action)(() =>
+			{
+				dataGridView2.DataSource = parts.ToList();
+
+				var gridRows = dataGridView2.Rows.OfType<DataGridViewRow>().ToList();
+				gridRows.ForEach(r =>
+				{
+					dynamic item = r.DataBoundItem;
+					if (item.AssyMark == item.PartMark)
+					{
+						r.DefaultCellStyle.Font = new Font(FontFamily.GenericSansSerif, 9, FontStyle.Bold);
+						r.DefaultCellStyle.BackColor = Color.LightCyan;
+						r.DefaultCellStyle.ForeColor = Color.Black;
+					}
+				});
+			}));
+
+			richTextBox1.BeginInvoke((Action) (() =>
+			{
+				richTextBox1.Text = allParts.ToJson();
+			}));
 		}
 
 		private void buttonRefresh_Click(object sender, EventArgs e)
@@ -275,34 +360,39 @@ namespace DrawingsManager
 			_drawings = _drawingHandler.GetDrawings().ToAList<Drawing>();
 			AddDrawingsToDataGridView();
 		}
-	}
 
-	public static class ExtensionMethods
-	{
-		public static List<T> ToAList<T>(this IEnumerator enumerator)
+		private void buttonOpenDrawing_Click(object sender, EventArgs e)
 		{
-			var list = new List<T>();
-			while (enumerator.MoveNext())
+			OpenDrawing();
+		}
+
+		private void dataGridView1_DoubleClick(object sender, EventArgs e)
+		{
+			OpenDrawing();
+		}
+
+		private void OpenDrawing()
+		{
+			var row = dataGridView1.CurrentRow?.DataBoundItem;
+			dynamic item = row;
+			if (item == null) return;
+
+			Drawing drawing;
+			if (item.PartMark.ToString() != string.Empty)
 			{
-				var loop = (T)enumerator.Current;
-				if (loop != null)
-					list.Add(loop);
+				var sdm = new SingleDrawingManager();
+				drawing = sdm.GetSinglePartDrawing(item.PartMark.ToString());
+				sdm.Handler.CloseActiveDrawing();
+				sdm.SetActiveDrawing(drawing);
+				return;
 			}
-			return list;
-		}
 
-		public static string ToJson(this object obj, bool formatting = true)
-		{
-			return
-				formatting
-					? JsonConvert.SerializeObject(obj, Formatting.Indented)
-					: JsonConvert.SerializeObject(obj, Formatting.None);
-		}
+			if (item.PartMark.ToString() != string.Empty || item.AssyMark.ToString() == string.Empty) return;
 
-		public static T FromJson<T>(this string json)
-		{
-			return JsonConvert.DeserializeObject<T>(json);
+			var adm = new AssemblyDrawingManager();
+			drawing = adm.GetAssemblyDrawing(item.AssyMark.ToString());
+			adm.Handler.CloseActiveDrawing();
+			adm.SetActiveDrawing(drawing);
 		}
 	}
-
 }

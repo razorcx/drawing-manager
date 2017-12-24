@@ -1,6 +1,6 @@
 ﻿namespace DrawingsManager
 {
-	partial class DrawingManager
+	partial class DrawingManagerForm
 	{
 		/// <summary>
 		/// Required designer variable.
@@ -28,7 +28,7 @@
 		/// </summary>
 		private void InitializeComponent()
 		{
-			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(DrawingManager));
+			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(DrawingManagerForm));
 			this.panel1 = new System.Windows.Forms.Panel();
 			this.pictureBox1 = new System.Windows.Forms.PictureBox();
 			this.dataGridView1 = new System.Windows.Forms.DataGridView();
@@ -43,6 +43,7 @@
 			this.buttonRefresh = new System.Windows.Forms.Button();
 			this.richTextBox1 = new System.Windows.Forms.RichTextBox();
 			this.label3 = new System.Windows.Forms.Label();
+			this.buttonOpenDrawing = new System.Windows.Forms.Button();
 			this.panel1.SuspendLayout();
 			((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
 			((System.ComponentModel.ISupportInitialize)(this.dataGridView1)).BeginInit();
@@ -91,6 +92,7 @@
 			this.dataGridView1.Size = new System.Drawing.Size(1317, 325);
 			this.dataGridView1.TabIndex = 0;
 			this.dataGridView1.RowEnter += new System.Windows.Forms.DataGridViewCellEventHandler(this.dataGridView1_RowEnter);
+			this.dataGridView1.DoubleClick += new System.EventHandler(this.dataGridView1_DoubleClick);
 			// 
 			// tableLayoutPanel1
 			// 
@@ -115,6 +117,7 @@
 			// 
 			// panel2
 			// 
+			this.panel2.Controls.Add(this.buttonOpenDrawing);
 			this.panel2.Controls.Add(this.buttonRefresh);
 			this.panel2.Controls.Add(this.label2);
 			this.panel2.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -219,6 +222,16 @@
 			this.label3.TabIndex = 1;
 			this.label3.Text = "Json Part Data";
 			// 
+			// buttonOpenDrawing
+			// 
+			this.buttonOpenDrawing.Location = new System.Drawing.Point(1048, -1);
+			this.buttonOpenDrawing.Name = "buttonOpenDrawing";
+			this.buttonOpenDrawing.Size = new System.Drawing.Size(127, 35);
+			this.buttonOpenDrawing.TabIndex = 1;
+			this.buttonOpenDrawing.Text = "Open";
+			this.buttonOpenDrawing.UseVisualStyleBackColor = true;
+			this.buttonOpenDrawing.Click += new System.EventHandler(this.buttonOpenDrawing_Click);
+			// 
 			// DrawingManager
 			// 
 			this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
@@ -227,7 +240,7 @@
 			this.ClientSize = new System.Drawing.Size(1323, 692);
 			this.Controls.Add(this.panel1);
 			this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
-			this.Name = "DrawingManager";
+			this.Name = "DrawingManagerForm";
 			this.Text = "Drawing Manager";
 			this.Load += new System.EventHandler(this.DrawingManager_Load);
 			this.panel1.ResumeLayout(false);
@@ -260,6 +273,7 @@
 		private System.Windows.Forms.Button buttonRefresh;
 		private System.Windows.Forms.RichTextBox richTextBox1;
 		private System.Windows.Forms.Label label3;
+		private System.Windows.Forms.Button buttonOpenDrawing;
 	}
 }
 
